@@ -1,3 +1,4 @@
 postgres_data
 dockerairflow
 .idea
+logs
