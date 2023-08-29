@@ -3,8 +3,13 @@ from airflow.utils.dates import days_ago
 from airflow.hooks.S3_hook import S3Hook
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python import PythonOperator
+from airflow.providers.amazon.aws.operators.emr import (
+    EmrAddStepsOperator,
+    EmrCreateJobFlowOperator,
+    EmrModifyClusterOperator,
+    EmrTerminateJobFlowOperator,
+)
 
-from plugins.hook.EmrHook import create_job_flow
 
 args = {
     'owner': 'Airflow',
@@ -36,7 +41,7 @@ with DAG('s3_read_example_with_hook',
     )
     job_flow_emr = []
     # Create the EMR cluster
-    create_emr_cluster = create_job_flow(
+    create_emr_cluster = EmrCreateJobFlowOperator(
         task_id="create_emr_cluster",
         job_flow_overrides=job_flow_emr,
         aws_conn_id="aws_default",
