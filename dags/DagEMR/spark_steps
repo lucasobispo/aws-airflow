@@ -1,0 +1,23 @@
+[
+    {
+        "Name": "Reclamacoes",
+        "ActionOnFailure": "TERMINATE_CLUSTER",
+        "HadoopJarStep": {"Jar": "command-runner.jar",
+                            "Args": [
+                                    "spark-submit",
+                                    "--master", "yarn",
+                                    "--deploy-mode", "cluster",
+                                    "--conf", "spark.serializer=org.apache.spark.serializer.KryoSerializer",
+                                    "--conf", "spark.sql.hive.convertMetastoreParquet=false",
+                                    "--conf", "spark.dynamicAllocation.enabled=true",
+                                    "s3://638059466675-application/spark_read.py",
+                                    "--bucket_name", "s3a://638059466675-source/Reclamacoes/",
+                                    "--separator", ";",
+                                    "--encoding", "ISO-8859-1",
+                                    "--file_format", "csv",
+                                    "--column_name", "instituicao_financeira",
+                                    "--s3_path", "s3://638059466675-target/Reclamacoes"
+                                    ],
+                        },
+    },
+]
