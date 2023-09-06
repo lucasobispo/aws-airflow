@@ -12,7 +12,7 @@ from airflow.providers.amazon.aws.operators.emr import (
 from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor
 
 args = {
-    'owner': 'Airflow',
+    'owner': 'lucas.bispo',
     'start_date': days_ago(0),
     'depends_on_past': False
 }
@@ -29,10 +29,19 @@ job_flow_emr = {
             "Configurations": [
                 {
                     "Classification": "export",
-                    "Properties": {"PYSPARK_PYTHON": "/usr/bin/python3"},
+                     "Properties": {"PYSPARK_PYTHON": "/usr/bin/python3"},
                 }
             ],
         }
+    ],
+    "BootstrapActions": [
+                {
+                    "Name": "Bootstrap action",
+                    "ScriptBootstrapAction": {
+                        "Path": "s3://638059466675-application/bootstrapfile.sh",
+                        "Args": [],
+                    },
+                },
     ],
     "Instances": {
         "InstanceGroups": [
@@ -57,7 +66,23 @@ job_flow_emr = {
     "JobFlowRole": "EMR_EC2_DefaultRole",
     "ServiceRole": "EMR_DefaultRole"
 }
-
+postgres_steps = [
+    {
+        "Name": "toPostgress",
+        "ActionOnFailure": "TERMINATE_CLUSTER",
+        "HadoopJarStep": {"Jar": "command-runner.jar",
+                            "Args": [
+                                    "spark-submit",
+                                    "--master", "yarn",
+                                    "--deploy-mode", "cluster",
+                                    "--conf", "spark.serializer=org.apache.spark.serializer.KryoSerializer",
+                                    "--conf", "spark.sql.hive.convertMetastoreParquet=false",
+                                    "--conf", "spark.dynamicAllocation.enabled=true",
+                                    "s3://638059466675-application/toPostgres.py"
+                                    ],
+                        },
+    },
+]
 spark_steps = [
     {
         "Name": "Reclamacoes",
@@ -149,7 +174,7 @@ def read_s3_data():
     print(data)
 
 
-with DAG('s3_read_example_with_hook',
+with DAG('ingestion_process',
          default_args=args,
          schedule_interval=None
          ):
@@ -187,6 +212,26 @@ with DAG('s3_read_example_with_hook',
         aws_conn_id="aws_lab",
     )
 
+
+    # steps to save Postgress
+    add_postgres_steps = EmrAddStepsOperator(
+        task_id="add_postgres_steps",
+        job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
+        aws_conn_id="aws_lab",
+        steps=postgres_steps,
+    )
+
+    postgres_last_step = len(postgres_steps) - 1
+    # Wait executions of all steps
+    postgres_check_execution_steps = EmrStepSensor(
+        task_id="postgres_check_execution_steps",
+        job_flow_id="{{ task_instance.xcom_pull('create_emr_cluster', key='return_value') }}",
+        step_id="{{ task_instance.xcom_pull(task_ids='add_postgres_steps', key='return_value')["
+                + str(postgres_last_step)
+                + "] }}",
+        aws_conn_id="aws_lab",
+    )
+
     # Terminate the EMR cluster
     terminate_emr_cluster = EmrTerminateJobFlowOperator(
         task_id="terminate_emr_cluster",
@@ -198,4 +243,4 @@ with DAG('s3_read_example_with_hook',
     end_dag = DummyOperator(task_id="end_dag")
     # Data pipeline flow
     start_dag >> [read_s3_task, create_emr_cluster] >> add_steps
-    add_steps >> check_execution_steps >> terminate_emr_cluster >> end_dag
+    add_steps >> check_execution_steps >> add_postgres_steps >> postgres_check_execution_steps >> terminate_emr_cluster >> end_dag
