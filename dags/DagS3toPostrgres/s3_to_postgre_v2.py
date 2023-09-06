@@ -19,9 +19,9 @@ default_args={
 }
  
 def read_from_s3_and_save_in_csv():
-    aws_access_key_id='ASIAQTH6AIH32ZF5GCHH'
-    aws_secret_access_key='LyeQRem/K9LmA+pR5YiZyc2taHidNX8y1+pRhbdc'
-    aws_session_token='FwoGZXIvYXdzEP3//////////wEaDD+anbyCxtqSUb7q4iLJAd6OuQfpDTTplnXzpiJolMafQmrGX6vspExR3rMlS1AxOzMely98yxpFRIfEHLHEJMuXdolgjv0AAjZL5zNR4LbKqhsYgJzzxtwIQYsWIHd9/nwwVmnw1dbfaL+FUhU336zil+umb2ZThOjQe4pvDGJbm9fQYQj5LFEHExaLM4UQ9ZgRidUYrXOUyOCBLrM81J9WgfzNUW+YkyzBSqX/Vei9qzlGjmCxW3K6IlCgRJ6693sdw9tk/6GacJ8fEmVJWLUpyCAUb6s50Sjm+bqnBjItqnqMn7MkNE3jju7A086QfcXpsTcFIy2k+PKe1BsWhp6q1Blp4AalqyS1j8fZ'
+    aws_access_key_id=''
+    aws_secret_access_key=''
+    aws_session_token=''
 
     bucket_name='041334882807-trab4-target'
     file_name='Resultados/tabela_final/'
