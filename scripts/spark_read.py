@@ -1,5 +1,5 @@
 import argparse
-
+import data_quality as dq
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lit
 from pyspark.sql import SparkSession
@@ -7,6 +7,7 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import DoubleType
 from pyspark.sql.window import Window
 from pyspark.sql.types import StringType
+import boto3
 
 spark = (
     SparkSession.builder.appName(f"processing table")
@@ -15,6 +16,7 @@ spark = (
     .config("spark.hadoop.fs.s3.multiobjectdelete.enable", "false")
     .getOrCreate()
 )
+s3_client = boto3.client('s3')
 
 print("passei no spark")
 
@@ -116,7 +118,10 @@ print("passei no df")
 
 rename_columns_df = rename_columns(empresa_glassdor) 
 glassdor_clean   = remove_word(dataframe = remove_accents(rename_columns_df), column_name= args.column_name)
-
+## Data quality ##
+table_name = args.s3_path.split("/")[-2] 
+results = dq.process_suite_ge(spark, glassdor_clean, table_name)
+dq.send_json_to_s3(results, args.bucket_name, table_name)
 glassdor_clean.write.mode("overwrite").parquet(args.s3_path)
 
 

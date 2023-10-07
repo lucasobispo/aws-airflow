@@ -1,10 +1,17 @@
 import pyspark
+from pyspark.sql.types import IntegerType,StringType,StructType,StructField,DoubleType, TimestampType
+from datetime import datetime as dt
+from datetime import timedelta
+from datetime import date
+from datetime import datetime
+import pyspark.sql.functions as f  
+from pyspark.sql.window import Window
+import sys
 from pyspark import SparkConf
 from pyspark.sql import SQLContext
-from pyspark.sql.types import IntegerType,StringType,StructType,StructField, TimestampType, DoubleType
-from  pyspark.sql.functions import split, col,to_date,lit,translate
-from datetime import datetime as dt, timedelta
-from  pyspark.sql.functions import input_file_name
+from pyspark.sql import SparkSession
+import logging
+import boto3
 import great_expectations as ge
 from great_expectations.dataset.sparkdf_dataset import SparkDFDataset
 from great_expectations.core.yaml_handler import YAMLHandler
@@ -12,28 +19,12 @@ from great_expectations.data_context.types.base import DataContextConfig
 from great_expectations.profile.basic_dataset_profiler import BasicDatasetProfiler
 from great_expectations.core.batch import RuntimeBatchRequest
 from great_expectations.core.expectation_configuration import ExpectationConfiguration
-from great_expectations.checkpoint import SimpleCheckpoint
+import json
+import decimal
 
-
-
-
-conf = SparkConf().setAll((
- ("spark.hadoop.mapreduce.fileoutputcommitter.marksuccessfuljobs", "false"),
- ("spark.sql.parquet.mergeSchema", "false")
-))
-
-
-sc = pyspark.SparkContext(conf=conf)
-sqlContext = SQLContext(sc)
-spark = sqlContext
-
-file_s3 = "s3://638059466675-source/Empregados/glassdoor_consolidado_join_match_v2.csv"
-output_path = "s3://638059466675-delivery/"
-
-
-suite_name = 'suite_tests_glassdoor_data'
-suite_profile_name = 'profile_glassdoor_data'
+dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 yaml = YAMLHandler()
+s3_client = boto3.client('s3')
 
 datasource_yaml = f"""
     name: my_spark_datasource
@@ -48,39 +39,18 @@ datasource_yaml = f"""
             class_name: RuntimeDataConnector
             batch_identifiers: [default_identifier_name]
     """
-
-
-def create_context_ge(output_path):
+def create_context_ge():
     context = ge.get_context()
 
     context.add_datasource(**yaml.load(datasource_yaml))
 
     return context
 
-def config_data_docs_site(context, output_path):
-    data_context_config = DataContextConfig()
-
-    data_context_config["data_docs_sites"] = {
-        "s3_site": {
-            "class_name": "SiteBuilder",
-            "store_backend": {
-                "class_name": "TupleS3StoreBackend",
-                "bucket": output_path.replace("s3://", "")
-            },
-            "site_index_builder": {
-                "class_name": "DefaultSiteIndexBuilder"
-            }
-        }
-    }
-
-    context._project_config["data_docs_sites"] = data_context_config["data_docs_sites"]
-    
-
 def create_validator(context, suite, df):
     runtime_batch_request = RuntimeBatchRequest(
         datasource_name="my_spark_datasource",
         data_connector_name="my_runtime_data_connector",
-        data_asset_name="glassdoor_data",
+        data_asset_name="dq_data",
         runtime_parameters={"batch_data": df},
         batch_identifiers={"default_identifier_name": "YOUR_MEANINGFUL_IDENTIFIER"}
     )
@@ -92,57 +62,51 @@ def create_validator(context, suite, df):
 
     return df_validator
 
-def process_suite_ge(spark, file_s3, output_path):
-    
-    df = spark.read.format("com.databricks.spark.csv").option("delimiter", ",").option("encoding", "UTF-8").option("ignoreLeadingWhiteSpace", "true").option("multiline", "true").option("escape", '"').option("header", "true").load(file_s3)
-    
+def process_suite_ge(spark,  df, table):    
     df_ge = SparkDFDataset(df)
 
-    context = create_context_ge(output_path)
-
-    #create suite expectativas
-    suite = context.add_expectation_suite(expectation_suite_name="my_suite")
-
-    expectation_configuration_1 = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_be_between",
-        kwargs={
-            "column": "reviews_count",
-            "min_value": 100, 
-            "max_value": 300, 
-            "mostly": 1.0,
-        },
-        meta={
-            "notes": {
-                "format": "markdown",
-                "content": "Some clever comment about this expectation. **Markdown** `Supported`",
-            }
-        },
-    )
-    suite.add_expectation(expectation_configuration=expectation_configuration_1)
-    expectation_configuration_2 = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_not_be_null",
-        kwargs={
-            "column": "employer-headquarters",
-            "mostly": 1.0,
-        },
-        meta={
-            "notes": {
-                "format": "markdown",
-                "content": "Some clever comment about this expectation. **Markdown** `Supported`",
-            }
-        },
-    )
-    suite.add_expectation(expectation_configuration=expectation_configuration_2)
-    context.save_expectation_suite(suite)
-
+    context = create_context_ge()
+    suite = context.add_expectation_suite(expectation_suite_name=f"dq_{table}")
     df_validator = create_validator(context, suite, df)
+
+
+    if table =="Empregados" :
+        expectation_type="expect_column_values_to_match_regex",
+        kwargs={
+            "column": "Nome",
+            regex: "^\D*$",
+        }
+        suite.add_expectation(expectation_configuration="Empregados_1")
+    elif table =="Banco":
+        expectation_type="expect_column_value_lengths_to_equal",
+        kwargs={
+            "column": "CNPJ",
+            value: 12,
+        }
+        suite.add_expectation(expectation_configuration="Bancos_1")
+    else:
+        expectation_type="expect_column_values_to_be_of_type",
+        kwargs={
+            "column": "quantidade_total_de_clientes",
+            type_ : int,
+        }
+        suite.add_expectation(expectation_configuration="Reclamacoes_1")
     results = df_validator.validate(expectation_suite=suite)
-    print(results)
-    config_data_docs_site(context, output_path)
-    context.build_data_docs(site_names=["s3_site"])
+    context.save_expectation_suite(suite)
+    return results
 
-
-process_suite_ge(spark, file_s3, output_path)
-    
-
-
+def send_json_to_s3(results_json, bucket, table):
+    results_dict = results_json.to_json_dict()
+    data = json.dumps(results_dict)
+    now = datetime.now()
+    year = now.year
+    month = now.strftime('%m')
+    day = now.strftime('%d')
+    date = now.strftime('%Y-%m-%d')
+    load_path = f"s3://638059466675-target/{table}/{year}/{month}/{day}/{table}_{date}.json"
+    s3_client.put_object(
+    Bucket=bucket,
+    Key=load_path,
+    Body=data,
+    ContentType='application/json'
+    )
